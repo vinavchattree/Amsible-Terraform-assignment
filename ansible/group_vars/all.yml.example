@@ -1,0 +1,8 @@
+# Copy this file to ansible/group_vars/all.yml and change the password.
+# Use a long alphanumeric password to avoid MongoDB URI-encoding issues.
+mongo_db_name: travelmemory
+mongo_app_user: travelmemory_app
+mongo_app_password: REPLACE_WITH_A_LONG_RANDOM_ALPHANUMERIC_PASSWORD
+node_major_version: "20"
+app_repo: https://github.com/UnpredictablePrashant/TravelMemory.git
+app_root: /opt/travelmemory

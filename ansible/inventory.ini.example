@@ -1,0 +1,8 @@
+[web]
+webserver ansible_host=REPLACE_WITH_WEB_PUBLIC_IP ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/REPLACE_WITH_KEY.pem
+
+[db]
+dbserver ansible_host=REPLACE_WITH_DB_PRIVATE_IP ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/REPLACE_WITH_KEY.pem ansible_ssh_common_args='-o ProxyJump=ubuntu@REPLACE_WITH_WEB_PUBLIC_IP'
+
+[all:vars]
+ansible_python_interpreter=/usr/bin/python3

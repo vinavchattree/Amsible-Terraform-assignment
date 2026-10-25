@@ -1,0 +1,30 @@
+.terraform/
+terraform/terraform.tfvars
+terraform.tfstate
+terraform.tfstate.*
+crash.log
+*.pem
+*.key
+inventory.ini
+ansible/group_vars/all.yml
+ansible/.vault-pass
+.DS_Store
+
+# Ignore Terraform state and plans everywhere
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/terraform.tfvars
+**/.terraform/
+
+# Ignore real Ansible inventory and local secrets
+ansible/inventory.ini
+inventory.ini
+ansible/group_vars/all.yml
+.env
+.env.*
+!.env.example
+
+# Ignore private keys
+id_rsa
+id_ed25519

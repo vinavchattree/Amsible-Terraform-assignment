@@ -1,0 +1,8 @@
+aws_region        = "ap-south-1"
+project_name      = "travelmemory"
+key_name          = "REPLACE_WITH_EXISTING_EC2_KEY_PAIR_NAME"
+my_ip_cidr        = "REPLACE_WITH_YOUR_PUBLIC_IP/32"
+web_instance_type = "t3.small"
+db_instance_type  = "t3.micro"
+volume_size_gb    = 12
+availability_zone = "ap-south-1a"

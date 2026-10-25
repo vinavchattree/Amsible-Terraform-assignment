@@ -1,0 +1,347 @@
+---
+- name: Configure private MongoDB server
+  hosts: db
+  become: true
+  vars_files:
+    - group_vars/all.yml
+  tasks:
+    - name: Install base packages
+      ansible.builtin.apt:
+        name:
+          - gnupg
+          - curl
+          - ca-certificates
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Add MongoDB 8.0 signing key
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -fsSL https://pgp.mongodb.com/server-8.0.asc |
+          gpg --dearmor --yes -o /usr/share/keyrings/mongodb-server-8.0.gpg
+      args:
+        executable: /bin/bash
+        creates: /usr/share/keyrings/mongodb-server-8.0.gpg
+
+    - name: Configure MongoDB 8.0 repository for Ubuntu 22.04
+      ansible.builtin.apt_repository:
+        repo: "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/8.0 multiverse"
+        filename: mongodb-org-8.0
+        state: present
+
+    - name: Install MongoDB
+      ansible.builtin.apt:
+        name: mongodb-org
+        state: present
+        update_cache: true
+
+    - name: Configure MongoDB bind address without auth for initial user creation
+      ansible.builtin.copy:
+        dest: /etc/mongod.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          storage:
+            dbPath: /var/lib/mongodb
+          systemLog:
+            destination: file
+            logAppend: true
+            path: /var/log/mongodb/mongod.log
+          net:
+            port: 27017
+            bindIp: 127.0.0.1,{{ ansible_host }}
+          processManagement:
+            timeZoneInfo: /usr/share/zoneinfo
+      notify: Restart MongoDB
+
+    - name: Flush MongoDB restart before user creation
+      ansible.builtin.meta: flush_handlers
+
+    - name: Ensure MongoDB is enabled and running
+      ansible.builtin.systemd:
+        name: mongod
+        state: started
+        enabled: true
+
+    - name: Wait for MongoDB to listen locally
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 27017
+        timeout: 90
+
+    - name: Create application user with readWrite access to application database
+      ansible.builtin.shell: |
+        mongosh --quiet --eval '
+          const adminDb = db.getSiblingDB("admin");
+          const existing = adminDb.getUser("{{ mongo_app_user }}");
+          if (!existing) {
+            adminDb.createUser({
+              user: "{{ mongo_app_user }}",
+              pwd: "{{ mongo_app_password }}",
+              roles: [{ role: "readWrite", db: "{{ mongo_db_name }}" }]
+            });
+          }
+        '
+      args:
+        executable: /bin/bash
+      no_log: true
+      changed_when: true
+
+    - name: Enable MongoDB authorization and retain private bind address
+      ansible.builtin.copy:
+        dest: /etc/mongod.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          storage:
+            dbPath: /var/lib/mongodb
+          systemLog:
+            destination: file
+            logAppend: true
+            path: /var/log/mongodb/mongod.log
+          net:
+            port: 27017
+            bindIp: 127.0.0.1,{{ ansible_host }}
+          security:
+            authorization: enabled
+          processManagement:
+            timeZoneInfo: /usr/share/zoneinfo
+      notify: Restart MongoDB
+
+    - name: Flush MongoDB auth restart
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify MongoDB service is active
+      ansible.builtin.command: systemctl is-active mongod
+      changed_when: false
+
+  handlers:
+    - name: Restart MongoDB
+      ansible.builtin.systemd:
+        name: mongod
+        state: restarted
+        enabled: true
+
+- name: Deploy TravelMemory app on public web server
+  hosts: web
+  become: true
+  vars_files:
+    - group_vars/all.yml
+  tasks:
+    - name: Install base packages
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - git
+          - nginx
+          - build-essential
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Add NodeSource signing key
+      ansible.builtin.shell: |
+        set -o pipefail
+        install -d -m 0755 /etc/apt/keyrings
+        curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key |
+          gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
+      args:
+        executable: /bin/bash
+        creates: /etc/apt/keyrings/nodesource.gpg
+
+    - name: Add NodeSource Node.js repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_{{ node_major_version }}.x nodistro main"
+        filename: nodesource
+        state: present
+
+    - name: Install Node.js and npm
+      ansible.builtin.apt:
+        name: nodejs
+        state: present
+        update_cache: true
+
+    - name: Install PM2 globally
+      ansible.builtin.command: npm install --global pm2
+      args:
+        creates: /usr/bin/pm2
+
+    - name: Create application root
+      ansible.builtin.file:
+        path: "{{ app_root }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0755"
+
+    - name: Clone TravelMemory repository
+      ansible.builtin.git:
+        repo: "{{ app_repo }}"
+        dest: "{{ app_root }}/source"
+        version: main
+        force: true
+      become_user: ubuntu
+
+    - name: Install backend npm dependencies
+      ansible.builtin.command: npm install --omit=dev
+      args:
+        chdir: "{{ app_root }}/source/backend"
+      become_user: ubuntu
+
+    - name: Configure backend environment
+      ansible.builtin.copy:
+        dest: "{{ app_root }}/source/backend/.env"
+        owner: ubuntu
+        group: ubuntu
+        mode: "0600"
+        content: |
+          PORT=3001
+          MONGO_URI=mongodb://{{ mongo_app_user }}:{{ mongo_app_password }}@{{ hostvars[groups['db'][0]].ansible_host }}:27017/{{ mongo_db_name }}?authSource=admin
+      no_log: true
+      notify: Restart TravelMemory backend
+
+    - name: Configure frontend API base URL to use same-origin Nginx proxy
+      ansible.builtin.lineinfile:
+        path: "{{ app_root }}/source/frontend/src/url.js"
+        regexp: '^export const baseUrl =.*'
+        line: 'export const baseUrl = process.env.REACT_APP_BACKEND_URL || "/api";'
+
+    - name: Install frontend npm dependencies
+      ansible.builtin.command: npm install
+      args:
+        chdir: "{{ app_root }}/source/frontend"
+      become_user: ubuntu
+
+    - name: Build React frontend
+      ansible.builtin.command: npm run build
+      args:
+        chdir: "{{ app_root }}/source/frontend"
+      environment:
+        REACT_APP_BACKEND_URL: /api
+        CI: "false"
+      become_user: ubuntu
+      notify: Restart Nginx
+
+    - name: Configure Nginx to serve React and proxy API requests
+      ansible.builtin.copy:
+        dest: /etc/nginx/sites-available/travelmemory
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          server {
+              listen 80 default_server;
+              listen [::]:80 default_server;
+              server_name _;
+              root {{ app_root }}/source/frontend/build;
+              index index.html;
+
+              location /api/ {
+                  proxy_pass http://127.0.0.1:3001/;
+                  proxy_http_version 1.1;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+
+              location / {
+                  try_files $uri $uri/ /index.html;
+              }
+          }
+      notify: Restart Nginx
+
+    - name: Enable TravelMemory Nginx site
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/travelmemory
+        dest: /etc/nginx/sites-enabled/travelmemory
+        state: link
+        force: true
+      notify: Restart Nginx
+
+    - name: Disable default Nginx site
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: Restart Nginx
+
+    - name: Install backend systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/travelmemory-backend.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=TravelMemory Node.js backend
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          Group=ubuntu
+          WorkingDirectory={{ app_root }}/source/backend
+          ExecStart=/usr/bin/node index.js
+          Restart=always
+          RestartSec=5
+          Environment=NODE_ENV=production
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Restart TravelMemory backend
+
+    - name: Reload systemd and enable backend service
+      ansible.builtin.systemd:
+        daemon_reload: true
+        name: travelmemory-backend
+        enabled: true
+        state: started
+
+    - name: Validate Nginx configuration
+      ansible.builtin.command: nginx -t
+      changed_when: false
+      notify: Restart Nginx
+
+    - name: Ensure Nginx is enabled and running
+      ansible.builtin.systemd:
+        name: nginx
+        enabled: true
+        state: started
+
+    - name: Wait for backend health endpoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3001/hello
+        status_code: 200
+      register: backend_health
+      retries: 12
+      delay: 5
+      until: backend_health.status == 200
+
+    - name: Verify frontend responds on port 80
+      ansible.builtin.uri:
+        url: http://127.0.0.1/
+        status_code: 200
+      register: frontend_health
+      retries: 6
+      delay: 5
+      until: frontend_health.status == 200
+
+  handlers:
+    - name: Restart TravelMemory backend
+      ansible.builtin.systemd:
+        name: travelmemory-backend
+        daemon_reload: true
+        state: restarted
+        enabled: true
+
+    - name: Restart Nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: restarted
+        enabled: true
