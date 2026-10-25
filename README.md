@@ -6,13 +6,10 @@ This starter project provisions the assignment's required two-instance architect
 - VPC, Internet Gateway, NAT Gateway, public/private route tables, security groups, EC2 IAM instance profile, and Terraform outputs.
 - Ansible configures MongoDB and deploys the application.
 
-## Cost warning
-A NAT Gateway is billed while it exists, in addition to EC2/EBS and public IPv4 costs. Check current AWS pricing for ap-south-1 before applying. Run `terraform destroy` when finished if you no longer need the environment. Do not destroy until you have saved screenshots/report and pushed your code.
-
 ## Requirements
 - AWS account permissions for VPC, EC2, EIP, NAT Gateway, IAM role/profile, and security groups.
 - AWS CLI v2 and Terraform installed on Windows.
-- Ansible installed in WSL2 Ubuntu (Ansible's control node is Linux; do not run the playbook from native Windows PowerShell).
+- Ansible installed in WSL2 Ubuntu.
 - Existing EC2 key pair in `ap-south-1`; the matching private PEM file must be available inside WSL.
 - Current public IPv4 address for SSH restriction.
 
@@ -98,16 +95,7 @@ From project root in WSL:
 ansible-playbook -i ansible/inventory.ini ansible/site.yml --syntax-check
 ansible-playbook -i ansible/inventory.ini ansible/site.yml
 ```
-First run may take 10–25 minutes depending on package mirrors and npm dependencies. Keep the terminal open. Frontend build can take several minutes.
 
-After success, open:
-`http://WEB_PUBLIC_IP/`
-
-Health checks:
-```bash
-curl -i http://WEB_PUBLIC_IP/
-curl -i http://WEB_PUBLIC_IP/api/hello
-```
 Expected API response: `Hello World!`
 
 ## Architecture / security notes
@@ -153,13 +141,8 @@ Check `ansible/group_vars/all.yml` and backend `.env` on the server. Re-run play
 
 ## 6. Deliverables checklist
 - [ ] `terraform/` files committed
-- [ ] `ansible/site.yml`, `ansible.cfg`, and example inventory/variables committed
-- [ ] Actual `terraform.tfvars`, `inventory.ini`, `group_vars/all.yml`, PEM, state files NOT committed
-- [ ] Screenshot of Terraform output (mask account IDs if desired)
-- [ ] Screenshot of VPC/subnets/route tables and two EC2 instances
+- [ ] `ansible/site.yml`, `ansible.cfg`, and example inventory/variables committed  
 - [ ] Screenshot of the working app in browser
-- [ ] Screenshot or terminal output for `/api/hello`
-- [ ] Architecture report completed (see `REPORT_TEMPLATE.md`)
 - [ ] GitHub repository link submitted through Vlearn
 
 ## 7. Cleanup after submission
